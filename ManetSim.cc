@@ -1,9 +1,14 @@
 #include "ManetSim.hh"
+#include "GnutellaApp.h"
+
+#include "ns3/flow-monitor-helper.h"
 
 #include <stdexcept>
 #include <sstream>
 
 using namespace ns3;
+
+NS_LOG_COMPONENT_DEFINE("ManetSim");
 
 ManetSim::ManetSim(
     unsigned int numNodes,
@@ -13,7 +18,8 @@ ManetSim::ManetSim(
     unsigned int packetSize,
     double sendInterval,
     double sendStartTime,
-    const std::string & routingProtocol)
+    const std::string & routingProtocol,
+    const std::string & whichApplication)
     : m_wifi(WifiHelper::Default()),
       m_wifiMac(NqosWifiMacHelper::Default()),
       m_wifiPhy(YansWifiPhyHelper::Default()),
@@ -22,7 +28,8 @@ ManetSim::ManetSim(
       m_packetSize(packetSize),
       m_sendInterval(sendInterval),
       m_sendStartTime(sendStartTime),
-      m_routingProtocol(routingProtocol)
+      m_routingProtocol(routingProtocol),
+      m_whichApplication(whichApplication)
 {
     m_wifi.SetStandard(WIFI_PHY_STANDARD_80211a);
     m_wifiChannel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
@@ -78,7 +85,25 @@ ManetSim::ManetSim(
     for(unsigned int n = 0; n < numNodes; ++n)
     {
         Ptr<Node> node = NodeList::GetNode(n);
-        installAppsForNode(node, m_sendStartTime);
+        installAppsForNode(
+            m_whichApplication,
+            node,
+            m_sendStartTime);
+    }
+
+    
+    FlowMonitorHelper fmh;
+    m_fm = fmh.InstallAll();
+
+    AsciiTraceHelper ascii;
+    m_wifiPhy.EnableAsciiAll(ascii.CreateFileStream("manet.tr"));
+
+    if(m_routingProtocol == "olsr")
+    {
+        OlsrHelper olsr;
+        Ptr<OutputStreamWrapper> routingStream = Create<OutputStreamWrapper>(
+            "manet.routes", std::ios::out);
+        olsr.PrintRoutingTableAllEvery(Seconds(2), routingStream);
     }
 
 ///    // Setup applications
@@ -154,9 +179,9 @@ void ManetSim::setupRoutingForNode(Ptr<Node> target_node)
     OlsrHelper olsr;
     AodvHelper aodv;
     DsdvHelper dsdv;
-    Ipv4StaticRoutingHelper staticRouting;
+//    Ipv4StaticRoutingHelper staticRouting;
     Ipv4ListRoutingHelper list;
-    list.Add(staticRouting, 0);
+//    list.Add(staticRouting, 0);
 
     if(m_routingProtocol == "olsr")
         list.Add(olsr, 100);
@@ -172,13 +197,25 @@ void ManetSim::setupRoutingForNode(Ptr<Node> target_node)
     internet.Install(target_node);
 }
 
-void ManetSim::installAppsForNode(Ptr<Node> node, double startTime)
+void ManetSim::installAppsForNode(
+    const std::string & whichApp,
+    Ptr<Node> node,
+    double startTime)
 {
-    // TODO: replace w/ something more interesting
-    installSimplePacketFlooder(node, startTime);
+    if(whichApp == "packet_flooding")
+        installPacketFlooder(node, startTime);
+    else if(whichApp == "gnutella")
+    {
+        LogComponentEnable("GnutellaApp", LOG_LEVEL_INFO);
+        installBaselineGnutella(node, startTime);
+    }
+    else if(whichApp == "gnutella_query_caching")
+        throw std::runtime_error("gnutella_query_caching is not implemented");
+    else
+        throw std::runtime_error("invalid application type: " + whichApp);
 }
 
-void ManetSim::installSimplePacketFlooder(Ptr<Node> node, double startTime)
+void ManetSim::installPacketFlooder(Ptr<Node> node, double startTime)
 {
     uint16_t port = 12345;
     uint32_t srcNode = node->GetId();
@@ -217,15 +254,56 @@ void ManetSim::installSimplePacketFlooder(Ptr<Node> node, double startTime)
     }
 }
 
+void ManetSim::logResults() const
+{
+    if(m_whichApplication == "packet_flooding")
+        printNumPacketsReceived();
+    //else if(m_whichApplication == "gnutella")
+    //    printGnutellaStats();
+
+    std::map<FlowId, FlowMonitor::FlowStats> fs = m_fm->GetFlowStats();
+    std::map<FlowId, FlowMonitor::FlowStats>::iterator it;
+
+    uint32_t delay = 0;
+    double lost_packets = 0;
+    double qdv = 0;
+    double j = 0;
+
+    for(it = fs.begin(); it != fs.end(); it++)
+    {
+        lost_packets += (*it).second.lostPackets;
+        qdv += (*it).second.jitterSum.GetSeconds();
+        delay += (*it).second.delaySum.GetSeconds();
+        j++;
+    }
+    
+    NS_LOG_INFO("Average Number of Lost Packets: " << lost_packets/j);
+    NS_LOG_INFO("Average PDV: " << qdv/j);
+    NS_LOG_INFO("Average Delay: " << delay/j);
+}
+
 void ManetSim::printNumPacketsReceived() const
 {
     for(PacketCounterType::const_iterator it = m_packetCounter.begin();
         it != m_packetCounter.end();
         ++it)
     {
-        std::cout << it->first << " -- " << it->second << "\n";
+        NS_LOG_INFO(it->first << " -- " << it->second);
     }
 }
+
+//void ManetSim::printGnutellaStats() const
+//{
+//    for(uint32_t n = 0; n < m_nodes.GetN(); ++n)
+//    {
+//        Ptr<Node> node = m_nodes.Get(n);
+//        Ptr<GnutellaApp> gapp = Ptr<GnutellaApp> (dynamic_cast<GnutellaApp *> (PeekPointer (node->GetApplication(0))));
+//        if(gapp)
+//        {
+//            gapp->LogMessageStats();
+//        }
+//    }
+//}
 
 void ManetSim::packetReceived(
     std::string path,
@@ -236,5 +314,49 @@ void ManetSim::packetReceived(
         m_packetCounter[path] = 1;
     else
         m_packetCounter[path] += 1;
+}
+
+void ManetSim::installBaselineGnutella(Ptr<Node> node, double startTime)
+{
+    unsigned int port = DEFAULT_LISTENING_PORT;
+    Ptr<GnutellaApp> app;
+    ApplicationContainer apps;
+
+    // if this node is the very first one in the container, assume it's
+    // the first node in the simulation and doesn't need a bootstrapping
+    // node
+    if(node == (*m_nodes.Begin()))
+    {
+        InetSocketAddress addr(m_addrs.GetAddress(0), port);
+        Address nullAddress;
+        app = CreateObject<GnutellaApp>(addr, nullAddress);
+    }
+    else
+    {
+        // otherwise, need to bootstrap this node somehow
+        // TODO: what's the best way to do this???
+        
+        // find this node's position in the list of nodes
+        unsigned int idx = 0;
+        NodeContainer::Iterator it;
+        for(it = m_nodes.Begin(); it != m_nodes.End(); ++it, ++idx)
+        {
+            if(*it == node)
+                break;
+        }
+
+        InetSocketAddress addr(m_addrs.GetAddress(idx), port);
+        InetSocketAddress boot(m_addrs.GetAddress(idx - 1), port);
+        //InetSocketAddress boot(m_addrs.GetAddress(0), port);
+
+        app = CreateObject<GnutellaApp>(addr, boot);
+    }
+
+    node->AddApplication(app);
+    apps.Add(app);
+
+    apps.Start(Seconds(startTime));
+    // TODO: make this configurable
+    apps.Stop(Seconds(299.));
 }
 

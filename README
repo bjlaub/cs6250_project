@@ -1,0 +1,20 @@
+Instructions for compiling/running MANET sim with ns3-gnutella:
+ 1. In the "manet" directory (i.e. this directory), get a clone of ns3-gnutella:
+        git clone https://github.com/ainscore/ns3-gnutella
+
+ 2. Copy the source files into this directory:
+        cp ns3-gnutella/*.cc ns3-gnutella/*.h .
+
+ 3. Fix the following bug in Descriptor.h (this crops up on my ns3 installation,
+    which is configured to run g++ with -Werror):
+        a. edit Descriptor.h
+        b. find the "PongDescriptor" class, and make the destructor virtual
+           (should be line 163 of Descriptor.h):
+           i.e. change:
+                ~PongDescriptor();
+           to be:
+                virtual ~PongDescriptor();
+
+ 4. Run the manet sim:
+        ./waf --run "manet --application=gnutella"
+

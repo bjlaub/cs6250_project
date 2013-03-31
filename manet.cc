@@ -8,6 +8,8 @@ NS_LOG_COMPONENT_DEFINE("Manet");
 
 int main(int argc, char *argv[])
 {
+    LogComponentEnable("ManetSim", LOG_LEVEL_INFO);
+
     uint32_t numNodes = 10;
     std::string whichMobility = "random2d";
     std::string allowCollisions = "yes";
@@ -16,6 +18,7 @@ int main(int argc, char *argv[])
     double sendInterval = 1;
     double sendStartTime = 10.0;
     std::string routingProtocol = "olsr";
+    std::string whichApplication = "packet_flooding";
 
     CommandLine cmd;
     cmd.AddValue("numNodes", "number of nodes total", numNodes);
@@ -26,6 +29,8 @@ int main(int argc, char *argv[])
     cmd.AddValue("sendInterval", "set send time interval [default=1sec]", sendInterval);
     cmd.AddValue("startSend", "set time at which sends begin [default=10sec]", sendStartTime);
     cmd.AddValue("routingProtocol", "set MANET routing protocol to use [default=olsr]", routingProtocol);
+    cmd.AddValue("application", 
+        "select application to use [packet_flooding|gnutella|gnutella_query_caching]", whichApplication);
     cmd.Parse(argc, argv);
 
     ManetSim manet(
@@ -36,14 +41,16 @@ int main(int argc, char *argv[])
         packetSize,
         sendInterval,
         sendStartTime,
-        routingProtocol);
+        routingProtocol,
+        whichApplication);
 
     Simulator::Stop(Seconds(300.));
     Simulator::Run();
+    
+    manet.logResults();
+    
     Simulator::Destroy();
 
-    manet.printNumPacketsReceived();
-    
     return 0;
 }
 

@@ -15,6 +15,7 @@
 #include "ns3/aodv-helper.h"
 #include "ns3/dsdv-helper.h"
 #include "ns3/internet-module.h"
+#include "ns3/flow-monitor.h"
 
 class ManetSim
 {
@@ -27,21 +28,29 @@ public:
         unsigned int packetSize,
         double sendInterval,
         double sendStartTime,
-        const std::string & routingProtocol);
+        const std::string & routingProtocol,
+        const std::string & whichApp);
 
     virtual ~ManetSim()
     { }
 
-    void printNumPacketsReceived() const;
+    void logResults() const;
 
 protected:
     typedef std::map<std::string, unsigned int> PacketCounterType;
 
+    void printNumPacketsReceived() const;
+    //void printGnutellaStats() const;
+
     void createNode();
     void setupRoutingForNode(ns3::Ptr<ns3::Node> target_node);
-    void installAppsForNode(ns3::Ptr<ns3::Node> node, double startTime);
+    void installAppsForNode(
+        const std::string & whichApp,
+        ns3::Ptr<ns3::Node> node,
+        double startTime);
 
-    void installSimplePacketFlooder(ns3::Ptr<ns3::Node> node, double startTime);
+    void installPacketFlooder(ns3::Ptr<ns3::Node> node, double startTime);
+    void installBaselineGnutella(ns3::Ptr<ns3::Node> node, double startTime);
 
     void packetReceived(
         std::string path,
@@ -64,8 +73,11 @@ protected:
     double m_sendStartTime;
 
     std::string m_routingProtocol;
+    std::string m_whichApplication;
 
     PacketCounterType m_packetCounter;
+
+    ns3::Ptr<ns3::FlowMonitor> m_fm;
 };
 
 #endif
